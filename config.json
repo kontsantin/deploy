@@ -1,0 +1,30 @@
+{
+  "project": {
+    "name": "graviton",
+    "description": "Auto-generated project"
+  },
+  "github": {
+    "repository_url": "https://github.com/kontsantin/graviton.git",
+    "branch": "main",
+    "auto_commit": true
+  },
+  "hosting": {
+    "provider": "custom",
+    "ssh_host": "mikhajd4.beget.tech",
+    "ssh_user": "mikhajd4_fucker",
+    "ssh_password": "FiJfNXM0fvz*",
+    "remote_path": "~/graviton.mikhajd4.beget.tech/public_html",
+    "backup_enabled": true
+  },
+  "deploy": {
+    "exclude_files": [
+      "deploy/",
+      ".git/",
+      "node_modules/",
+      "*.log",
+      ".env*",
+      "README.md"
+    ],
+    "create_backup": true
+  }
+}
