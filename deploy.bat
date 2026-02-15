@@ -25,13 +25,14 @@ if not exist "deploy\config.json" (
 echo var fso = WScript.CreateObject("Scripting.FileSystemObject"); > deploy\parse.js
 echo var data = fso.OpenTextFile("deploy\\config.json", 1).ReadAll(); >> deploy\parse.js
 echo var json = eval("(" + data + ")"); >> deploy\parse.js
-echo WScript.Echo("set \"PROJECT_NAME=" + json.project.name + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"REPO_URL=" + json.github.repository_url + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"BRANCH=" + json.github.branch + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"SSH_HOST=" + json.hosting.ssh_host + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"SSH_USER=" + json.hosting.ssh_user + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"SSH_PASS=" + json.hosting.ssh_password + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"REMOTE_PATH=" + json.hosting.remote_path + "\""); >> deploy\parse.js
+echo function safe(v) { return (v || "").toString().trim(); } >> deploy\parse.js
+echo WScript.Echo("set \"PROJECT_NAME=" + safe(json.project.name) + "\""); >> deploy\parse.js
+echo WScript.Echo("set \"REPO_URL=" + safe(json.github.repository_url) + "\""); >> deploy\parse.js
+echo WScript.Echo("set \"BRANCH=" + safe(json.github.branch) + "\""); >> deploy\parse.js
+echo WScript.Echo("set \"SSH_HOST=" + safe(json.hosting.ssh_host) + "\""); >> deploy\parse.js
+echo WScript.Echo("set \"SSH_USER=" + safe(json.hosting.ssh_user) + "\""); >> deploy\parse.js
+echo WScript.Echo("set \"SSH_PASS=" + safe(json.hosting.ssh_password) + "\""); >> deploy\parse.js
+echo WScript.Echo("set \"REMOTE_PATH=" + safe(json.hosting.remote_path) + "\""); >> deploy\parse.js
 
 cscript //nologo deploy\parse.js > deploy\env.bat
 if exist deploy\env.bat (
@@ -89,7 +90,7 @@ echo 🔑 Настройки SSH (хостинг)
 set /p "SSH_HOST=🖥️  Хост (например, host.beget.com): "
 set /p "SSH_USER=👤 Пользователь SSH: "
 set /p "SSH_PASS=🔑 Пароль SSH: "
-set /p "REMOTE_PATH=📂 Путь на сервере (например, ~/graviton.mikhajd4.beget.tech/public_html/wp-content/themes/graviton): "
+set /p "REMOTE_PATH=📂 Путь на сервере (например, ~/public_html): "
 
 goto save_full_config
 
@@ -369,6 +370,29 @@ if errorlevel 1 (
     gh auth login -p https -w
 )
 
+:: ПРОВЕРКА ЛОКАЛЬНОГО СОЕДИНЕНИЯ (ПРЕЖДЕ ЧЕМ ОТПРАВЛЯТЬ)
+echo.
+echo 🔍 Проверка SSH соединения с хостингом...
+where plink >nul 2>&1
+if not errorlevel 1 (
+    echo y | plink -ssh -l "!SSH_USER!" -pw "!SSH_PASS!" "!SSH_HOST!" "exit" >nul 2>&1
+    if errorlevel 1 (
+        echo.
+        echo ❌ ОШИБКА: Ваши логин или пароль НЕ РАБОТАЮТ!
+        echo Сервер !SSH_HOST! отверг подключение.
+        echo.
+        echo Логин: '!SSH_USER!'
+        echo Пароль: ******* (проверьте config.json)
+        echo.
+        pause
+        goto menu
+    ) else (
+        echo ✅ Логин и пароль верные!
+    )
+) else (
+    echo ⚠️ Plink не найден, пропускаем локальную проверку...
+)
+
 :: 3. Создаем Workflow
 echo [1/2] 📝 Обновляем файл workflow...
 if not exist ".github\workflows" mkdir ".github\workflows"
@@ -396,18 +420,57 @@ if not exist ".github\workflows" mkdir ".github\workflows"
 ) > ".github\workflows\deploy.yml"
 echo ✅ Файл workflow обновлен (включен debug режим).
 
-:: 4. Настройка секретов через PowerShell (Самый надежный метод)
-echo [2/2] 🔐 Загрузка секретов в репозиторий...
+:: 4. Настройка секретов
+echo [2/2] 🔐 Загрузка секретов в репозиторий (!REPO_SLUG!)...
 echo.
 
-powershell -Command "$json = Get-Content 'deploy\config.json' -Raw | ConvertFrom-Json; $repo = $json.github.repository_url -replace 'https://github.com/', '' -replace '\.git$', ''; Write-Host 'Настраиваем репозиторий: ' $repo; Start-Process -NoNewWindow -Wait gh -ArgumentList ('secret', 'set', 'SSH_HOST', '-b', $json.hosting.ssh_host, '-R', $repo); Start-Process -NoNewWindow -Wait gh -ArgumentList ('secret', 'set', 'SSH_USER', '-b', $json.hosting.ssh_user, '-R', $repo); Start-Process -NoNewWindow -Wait gh -ArgumentList ('secret', 'set', 'REMOTE_PATH', '-b', $json.hosting.remote_path, '-R', $repo); [IO.File]::WriteAllText('pass.tmp', $json.hosting.ssh_password); cmd /c 'gh secret set SSH_PASSWORD -R ' + $repo + ' < pass.tmp'; Remove-Item 'pass.tmp' -ErrorAction SilentlyContinue"
+:: ПРОВЕРКА: Пароль в памяти
+if "!SSH_PASS!"=="" (
+    echo ⚠️  Пароль не загружен из конфига.
+    set /p "SSH_PASS=🔑 Введите SSH пароль для отправки: "
+)
+
+:: ПРОВЕРКА: Если все равно пустой
+if "!SSH_PASS!"=="" (
+    echo ❌ ОШИБКА: Пароль пустой! Нечего отправлять.
+    pause
+    goto menu
+)
+
+echo ⏳ Отправляем секреты...
+
+:: Обычные поля
+echo   1. SSH_HOST
+echo !SSH_HOST! | gh secret set SSH_HOST -R "!REPO_SLUG!"
+echo   2. SSH_USER
+echo !SSH_USER! | gh secret set SSH_USER -R "!REPO_SLUG!"
+echo   3. REMOTE_PATH
+echo !REMOTE_PATH! | gh secret set REMOTE_PATH -R "!REPO_SLUG!"
+
+:: Пароль (через PowerShell для надежности)
+echo   4. SSH_PASSWORD
+powershell -Command "[IO.File]::WriteAllText('pass.tmp', '!SSH_PASS!')"
+
+if not exist pass.tmp (
+    echo ❌ Не удалось создать временный файл с паролем.
+    pause
+    goto menu
+)
+
+gh secret set SSH_PASSWORD -R "!REPO_SLUG!" < pass.tmp
+del pass.tmp
 
 if errorlevel 1 (
-    echo ❌ Ошибка при настройки секретов!
-    echo Проверьте корректность JSON или доступ к репозиторию.
+    echo ❌ Ошибка GitHub CLI при отправке пароля.
 ) else (
-    echo ✅ ВСЕ СЕКРЕТЫ УСПЕШНО ОБНОВЛЕНЫ!
+    echo ✅ Пароль успешно загружен!
 )
+
+echo.
+echo 📊 Проверка списка секретов на GitHub:
+gh secret list -R "!REPO_SLUG!"
+echo.
+echo (Если вы видите список выше - значит связь есть)
 pause
 goto menu
 
