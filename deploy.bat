@@ -1,522 +1,434 @@
 @echo off
-chcp 65001 > nul
-setlocal enabledelayedexpansion
+chcp 65001 >nul
+setlocal EnableExtensions EnableDelayedExpansion
 title Universal Deploy System
 
 cd /d "%~dp0"
-cd ..
+if not exist ".git" (
+    cd ..
+)
 
-:: Проверка наличия папки deploy
 if not exist "deploy" mkdir "deploy"
 
-:: Загружаем конфигурацию
-if not exist "deploy\config.json" (
-    echo.
-    echo ╔════════════════════════════════════════════════════╗
-    echo ║           🚀 ДОБРО ПОЖАЛОВАТЬ!                     ║
-    echo ║  Похоже, это первый запуск в этом проекте.         ║
-    echo ║  Давайте создадим конфигурацию.                    ║
-    echo ╚════════════════════════════════════════════════════╝
-    echo.
-    goto first_setup
-)
+call :load_config
+if errorlevel 1 goto first_setup
+goto menu
 
-:: Извлекаем данные через временный JS скрипт
-echo var fso = WScript.CreateObject("Scripting.FileSystemObject"); > deploy\parse.js
-echo var data = fso.OpenTextFile("deploy\\config.json", 1).ReadAll(); >> deploy\parse.js
-echo var json = eval("(" + data + ")"); >> deploy\parse.js
-echo function safe(v) { return (v || "").toString().trim(); } >> deploy\parse.js
-echo WScript.Echo("set \"PROJECT_NAME=" + safe(json.project.name) + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"REPO_URL=" + safe(json.github.repository_url) + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"BRANCH=" + safe(json.github.branch) + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"SSH_HOST=" + safe(json.hosting.ssh_host) + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"SSH_USER=" + safe(json.hosting.ssh_user) + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"SSH_PASS=" + safe(json.hosting.ssh_password) + "\""); >> deploy\parse.js
-echo WScript.Echo("set \"REMOTE_PATH=" + safe(json.hosting.remote_path) + "\""); >> deploy\parse.js
+:load_config
+if not exist "deploy\config.json" exit /b 1
 
-cscript //nologo deploy\parse.js > deploy\env.bat
-if exist deploy\env.bat (
-    call deploy\env.bat
-    del deploy\env.bat
-)
-if exist deploy\parse.js del deploy\parse.js
+set "env_file=deploy\env_%random%%random%.bat"
+powershell -NoProfile -ExecutionPolicy Bypass -File "read-config.ps1" -ConfigPath "deploy\config.json" -OutPath "!env_file!" >nul 2>&1
+if errorlevel 1 exit /b 1
+if not exist "!env_file!" exit /b 1
+
+call "!env_file!"
+del "!env_file!" >nul 2>&1
+
+if not defined BRANCH set "BRANCH=main"
+if not defined SSH_PORT set "SSH_PORT=22"
+exit /b 0
+
+:first_setup
+cls
+echo.
+echo ============================================================
+echo               ПЕРВИЧНАЯ НАСТРОЙКА DEPLOY
+echo ============================================================
+echo Заполните данные проекта. Позже их можно изменить в меню.
+echo.
+set /p "PROJECT_NAME=Название проекта: "
+set /p "REPO_URL=URL GitHub репозитория (https://github.com/user/repo.git): "
+set /p "BRANCH=Рабочая ветка GitHub [main]: "
+if not defined BRANCH set "BRANCH=main"
+
+echo.
+echo --------------------- SSH НАСТРОЙКИ ------------------------
+set /p "SSH_HOST=SSH host (например host.beget.com): "
+set /p "SSH_PORT=SSH port [22]: "
+if not defined SSH_PORT set "SSH_PORT=22"
+set /p "SSH_USER=SSH user: "
+set /p "SSH_KEY_PATH=Путь к приватному ключу (например C:\Users\user\.ssh\id_rsa): "
+set /p "SSH_PASS=Пароль SSH (необязательно, fallback): "
+set /p "REMOTE_PATH=Путь на сервере (например ~/public_html): "
+
+goto save_config
+
+:configure
+cls
+echo.
+echo ============================================================
+echo                    ИЗМЕНЕНИЕ НАСТРОЕК
+echo ============================================================
+echo Нажмите Enter, чтобы оставить текущее значение.
+
+echo.
+set /p "new_project_name=Имя проекта [!PROJECT_NAME!]: "
+if defined new_project_name set "PROJECT_NAME=!new_project_name!"
+
+set /p "new_repo_url=URL репозитория [!REPO_URL!]: "
+if defined new_repo_url set "REPO_URL=!new_repo_url!"
+
+set /p "new_branch=Ветка [!BRANCH!]: "
+if defined new_branch set "BRANCH=!new_branch!"
+
+echo.
+echo --------------------- SSH НАСТРОЙКИ ------------------------
+set /p "new_ssh_host=SSH host [!SSH_HOST!]: "
+if defined new_ssh_host set "SSH_HOST=!new_ssh_host!"
+
+set /p "new_ssh_port=SSH port [!SSH_PORT!]: "
+if defined new_ssh_port set "SSH_PORT=!new_ssh_port!"
+
+set /p "new_ssh_user=SSH user [!SSH_USER!]: "
+if defined new_ssh_user set "SSH_USER=!new_ssh_user!"
+
+set /p "new_ssh_key_path=Путь к ключу [!SSH_KEY_PATH!]: "
+if defined new_ssh_key_path set "SSH_KEY_PATH=!new_ssh_key_path!"
+
+set /p "new_ssh_pass=SSH пароль [скрыт]: "
+if defined new_ssh_pass set "SSH_PASS=!new_ssh_pass!"
+
+set /p "new_remote_path=Путь на сервере [!REMOTE_PATH!]: "
+if defined new_remote_path set "REMOTE_PATH=!new_remote_path!"
+
+goto save_config
+
+:json_escape
+setlocal EnableDelayedExpansion
+set "val=!%~1!"
+set "val=!val:\=\\!"
+set "val=!val:"=\"!"
+endlocal & set "%~2=%val%"
+exit /b
+
+:save_config
+if not exist "deploy" mkdir "deploy"
+
+call :json_escape PROJECT_NAME PROJECT_NAME_J
+call :json_escape REPO_URL REPO_URL_J
+call :json_escape BRANCH BRANCH_J
+call :json_escape SSH_HOST SSH_HOST_J
+call :json_escape SSH_PORT SSH_PORT_J
+call :json_escape SSH_USER SSH_USER_J
+call :json_escape SSH_PASS SSH_PASS_J
+call :json_escape SSH_KEY_PATH SSH_KEY_PATH_J
+call :json_escape REMOTE_PATH REMOTE_PATH_J
+
+(
+    echo {
+    echo   "project": {
+    echo     "name": "!PROJECT_NAME_J!",
+    echo     "description": "Auto-generated project"
+    echo   },
+    echo   "github": {
+    echo     "repository_url": "!REPO_URL_J!",
+    echo     "branch": "!BRANCH_J!",
+    echo     "auto_commit": true
+    echo   },
+    echo   "hosting": {
+    echo     "provider": "custom",
+    echo     "ssh_host": "!SSH_HOST_J!",
+    echo     "ssh_port": "!SSH_PORT_J!",
+    echo     "ssh_user": "!SSH_USER_J!",
+    echo     "ssh_password": "!SSH_PASS_J!",
+    echo     "ssh_key_path": "!SSH_KEY_PATH_J!",
+    echo     "remote_path": "!REMOTE_PATH_J!",
+    echo     "backup_enabled": true
+    echo   },
+    echo   "deploy": {
+    echo     "exclude_files": [
+    echo       "deploy/",
+    echo       ".git/",
+    echo       "node_modules/",
+    echo       "*.log",
+    echo       ".env*",
+    echo       "README.md"
+    echo     ],
+    echo     "create_backup": true
+    echo   }
+    echo }
+) > "deploy\config.json"
+
+echo.
+echo ============================================================
+echo Настройки успешно сохранены в deploy\config.json
+echo ============================================================
+pause
+goto menu
 
 :menu
 cls
 echo.
-echo ╔════════════════════════════════════════════════════╗
-echo ║              🚀 UNIVERSAL DEPLOY 🚀                ║
-echo ╠════════════════════════════════════════════════════╣
-echo ║                                                    ║
-echo ║  📂 Проект: !PROJECT_NAME!                        ║  
-echo ║  🌐 GitHub: !REPO_URL!
-echo ║  🖥️  Хостинг: !SSH_USER!@!SSH_HOST!               ║
-echo ║                                                    ║
-echo ╠════════════════════════════════════════════════════╣
-echo ║                                                    ║
-echo ║  1. 📤 Сохранить в GitHub (+ Авто-деплой Action)  ║
-echo ║  2. 🔗 Только залить на сервер (SSH с ПК)         ║
-echo ║  3. 🚀 Ручной деплой (В Git и сразу на Сервер)    ║
-echo ║  4. 🤖 Настроить GitHub Actions (Авто-деплой)     ║
-echo ║  5. ⚙️  Изменить настройки                         ║
-echo ║  6. 📊 Статус                                      ║
-echo ║  7. ❌ Выход                                       ║
-echo ║                                                    ║
-echo ╚════════════════════════════════════════════════════╝
+echo ============================================================
+echo                   UNIVERSAL DEPLOY (UTF-8)
+echo ============================================================
+echo Проект        : !PROJECT_NAME!
+echo GitHub        : !REPO_URL!
+echo Хостинг       : !SSH_USER!@!SSH_HOST!:!SSH_PORT!
+echo Ключ SSH      : !SSH_KEY_PATH!
+echo Remote path   : !REMOTE_PATH!
 echo.
-
-set /p choice="Выберите опцию (1-7): "
+echo 1. Сохранить изменения в GitHub
+echo 2. Залить на сервер (локальный SSH деплой)
+echo 3. Полный деплой (GitHub + сервер)
+echo 4. Настроить GitHub Actions (деплой по SSH ключу)
+echo 5. Изменить настройки проекта
+echo 6. Проверить статус
+echo 7. Выход
+echo.
+set /p "choice=Выберите опцию (1-7): "
 
 if "%choice%"=="1" goto github_deploy
-if "%choice%"=="2" goto ssh_deploy  
+if "%choice%"=="2" goto ssh_deploy
 if "%choice%"=="3" goto full_deploy
 if "%choice%"=="4" goto setup_actions
 if "%choice%"=="5" goto configure
 if "%choice%"=="6" goto status
 if "%choice%"=="7" goto exit
-goto invalid
-
-:first_setup
-echo ⚙️  ПЕРВОНАЧАЛЬНАЯ НАСТРОЙКА
-echo ════════════════════════════════
-echo.
-set /p "PROJECT_NAME=📌 Имя проекта (по-английски): "
-set /p "REPO_URL=🌐 URL репозитория GitHub (https://github.com/user/repo.git): "
-set /p "BRANCH=🌿 Ветка GitHub (master/main) [master]: "
-if "!BRANCH!"=="" set "BRANCH=master"
 
 echo.
-echo 🔑 Настройки SSH (хостинг)
-set /p "SSH_HOST=🖥️  Хост (например, host.beget.com): "
-set /p "SSH_USER=👤 Пользователь SSH: "
-set /p "SSH_PASS=🔑 Пароль SSH: "
-set /p "REMOTE_PATH=📂 Путь на сервере (например, ~/public_html): "
-
-goto save_full_config
-
-:configure
-cls
-echo ⚙️  ИЗМЕНЕНИЕ НАСТРОЕК
-echo ══════════════════════════
-echo Введите новые данные (или Enter, чтобы оставить старые)
-echo.
-
-set /p "new_project_name=📌 Имя проекта [!PROJECT_NAME!]: "
-if not "!new_project_name!"=="" set "PROJECT_NAME=!new_project_name!"
-
-set /p "new_repo_url=🌐 URL репозитория GitHub [!REPO_URL!]: "
-if not "!new_repo_url!"=="" set "REPO_URL=!new_repo_url!"
-
-set /p "new_branch=🌿 Ветка GitHub [!BRANCH!]: "
-if not "!new_branch!"=="" set "BRANCH=!new_branch!"
-
-echo.
-echo 🔑 Настройки SSH
-set /p "new_ssh_host=🖥️  Хост [!SSH_HOST!]: "
-if not "!new_ssh_host!"=="" set "SSH_HOST=!new_ssh_host!"
-
-set /p "new_ssh_user=👤 Пользователь [!SSH_USER!]: "
-if not "!new_ssh_user!"=="" set "SSH_USER=!new_ssh_user!"
-
-set /p "new_ssh_pass=🔑 Пароль [*******]: "
-if not "!new_ssh_pass!"=="" set "SSH_PASS=!new_ssh_pass!"
-
-set /p "new_remote_path=📂 Путь [!REMOTE_PATH!]: "
-if not "!new_remote_path!"=="" set "REMOTE_PATH=!new_remote_path!"
-
-:save_full_config
-echo.
-echo 💾 Сохраняем настройки в deploy\config.json...
-
-(
-echo {
-echo   "project": {
-echo     "name": "!PROJECT_NAME!",
-echo     "description": "Auto-generated project"
-echo   },
-echo   "github": {
-echo     "repository_url": "!REPO_URL!",
-echo     "branch": "!BRANCH!",
-echo     "auto_commit": true
-echo   },
-echo   "hosting": {
-echo     "provider": "custom",
-echo     "ssh_host": "!SSH_HOST!",
-echo     "ssh_user": "!SSH_USER!",
-echo     "ssh_password": "!SSH_PASS!",
-echo     "remote_path": "!REMOTE_PATH!",
-echo     "backup_enabled": true
-echo   },
-echo   "deploy": {
-echo     "exclude_files": [
-echo       "deploy/",
-echo       ".git/",
-echo       "node_modules/",
-echo       "*.log",
-echo       ".env*",
-echo       "README.md"
-echo     ],
-echo     "create_backup": true
-echo   }
-echo }
-) > deploy\config.json
-
-echo ✅ Настройки сохранены!
-if exist deploy\parse.js del deploy\parse.js
-if exist deploy\env.bat del deploy\env.bat
-pause
+echo Неверный выбор. Укажите число от 1 до 7.
+timeout /t 2 >nul
 goto menu
 
-:github_deploy
-echo.
-echo 📤 GITHUB ДЕПЛОЙ
-echo ═══════════════════
-echo.
-
-:: Проверяем git
-git status >nul 2>&1
+:ensure_git
+git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
-    echo ❌ Git репозиторий не инициализирован.
-    echo Инициализируем...
     git init
-    git remote add origin !REPO_URL!
+)
+
+git remote get-url origin >nul 2>&1
+if errorlevel 1 (
+    git remote add origin "!REPO_URL!"
 ) else (
-    :: Проверяем, совпадает ли URL, и исправляем если нет
-    for /f "tokens=*" %%u in ('git remote get-url origin') do set "CURRENT_REMOTE=%%u"
-    
-    if not "!CURRENT_REMOTE!"=="!REPO_URL!" (
-        echo ⚠️  URL репозитория изменился!
-        echo Было: !CURRENT_REMOTE!
-        echo Стало: !REPO_URL!
-        echo Обновляем...
-        git remote set-url origin !REPO_URL!
-    )
+    for /f "usebackq delims=" %%u in (`git remote get-url origin`) do set "CURRENT_REMOTE=%%u"
+    if /i not "!CURRENT_REMOTE!"=="!REPO_URL!" git remote set-url origin "!REPO_URL!"
 )
+exit /b 0
 
-:: Проверка и создание .gitignore
-if not exist ".gitignore" (
-    echo 📄 Создаем .gitignore...
-    (
-        echo # WordPress
-        echo wp-config.php
-        echo wp-content/uploads/
-        echo wp-content/cache/
-        echo.
-        echo # Deploy system
-        echo deploy/config.json
-        echo.
-        echo # Logs
-        echo *.log
-        echo.
-        echo # IDE
-        echo .vscode/
-        echo .idea/
-        echo.
-        echo # OS files
-        echo .DS_Store
-        echo Thumbs.db
-        echo.
-        echo # Dependencies
-        echo node_modules/
-        echo.
-        echo # System
-        echo .gitignore
-        echo deploy/
-    ) > ".gitignore"
-    echo ✅ .gitignore создан!
-)
+:github_deploy
+call :ensure_git
 
-echo Добавляем файлы...
+echo.
+echo ============================================================
+echo                      GITHUB DEPLOY
+echo ============================================================
+echo Шаг 1/3: Добавляем файлы в индекс...
 git add .
 
-set /p commit_msg="💬 Сообщение коммита (Enter для автоматического): "
-if "!commit_msg!"=="" (
-    for /f "tokens=1-3 delims=./ " %%a in ('date /t') do (
-        for /f "tokens=1-2 delims=: " %%d in ('time /t') do (
-            set "commit_msg=Деплой %%c.%%b.%%a %%d:%%e"
-        )
-    )
-)
+set "commit_msg="
+set /p "commit_msg=Сообщение коммита (Enter = авто): "
+if not defined commit_msg set "commit_msg=Deploy %date% %time%"
 
-echo Коммит: !commit_msg!
-git commit -m "!commit_msg!"
+echo Шаг 2/3: Создаем коммит...
+git commit -m "!commit_msg!" >nul 2>&1
+for /f "usebackq delims=" %%b in (`git branch --show-current`) do set "CURRENT_BRANCH=%%b"
+if not defined CURRENT_BRANCH set "CURRENT_BRANCH=!BRANCH!"
 
-:: Определяем текущую ветку
-for /f "tokens=*" %%a in ('git branch --show-current') do set "CURRENT_BRANCH=%%a"
-if "!CURRENT_BRANCH!"=="" set "CURRENT_BRANCH=master"
-
-echo.
-echo 🌿 Текущая ветка: !CURRENT_BRANCH!
-echo 🎯 Целевая ветка: !BRANCH!
-
-echo Загружаем на GitHub...
-git push origin !CURRENT_BRANCH!:!BRANCH!
-
+echo Шаг 3/3: Push в origin/!BRANCH!...
+git push -u origin "!CURRENT_BRANCH!:!BRANCH!"
 if errorlevel 1 (
-    echo.
-    echo ❌ Ошибка загрузки.
-    echo 🔧 Попытка Force Push ^(если истории разошлись^)...
-    set /p force_push="🔥 Выполнить Force Push? (y/n): "
-    if /i "!force_push!"=="y" (
-        git push origin !CURRENT_BRANCH!:!BRANCH! --force
-        if not errorlevel 1 echo ✅ Успешно загружено (Force Push^)^^!
-    )
+    echo Ошибка push.
 ) else (
-    echo ✅ Успешно загружено на GitHub!
+    echo Успешно отправлено в GitHub.
 )
 pause
 goto menu
 
 :ssh_deploy
+echo.
+echo ============================================================
+echo                     SSH ДЕПЛОЙ (ЛОКАЛЬНО)
+echo ============================================================
 call :ssh_deploy_process
 pause
 goto menu
 
 :ssh_deploy_process
-echo.  
-echo 🔗 SSH ДЕПЛОЙ НА ХОСТИНГ
-echo ══════════════════════════
-echo.
+if not defined SSH_HOST (
+    echo Ошибка: не задан SSH_HOST.
+    exit /b 1
+)
+if not defined SSH_USER (
+    echo Ошибка: не задан SSH_USER.
+    exit /b 1
+)
+if not defined REMOTE_PATH (
+    echo Ошибка: не задан REMOTE_PATH.
+    exit /b 1
+)
+if not defined SSH_PORT set "SSH_PORT=22"
 
-:: Проверяем SSH клиент
-where scp >nul 2>&1 || where plink >nul 2>&1
+echo Подготовка файлов к отправке...
+
+if defined SSH_KEY_PATH (
+    if exist "!SSH_KEY_PATH!" goto ssh_with_key
+)
+if defined SSH_PASS goto ssh_with_password
+
+echo Не найден корректный путь к SSH ключу и нет SSH пароля для fallback.
+exit /b 1
+
+:ssh_with_key
+where ssh >nul 2>&1
 if errorlevel 1 (
-    echo ❌ SSH клиент не найден!
-    echo Установите PuTTY или OpenSSH
+    echo Не найден ssh клиент.
+    exit /b 1
+)
+where scp >nul 2>&1
+if errorlevel 1 (
+    echo Не найден scp клиент.
     exit /b 1
 )
 
-echo 📦 Подготавливаем файлы...
-set "temp_dir=temp_deploy_%random%"
-mkdir "%temp_dir%"
-
-:: Копируем основные типы файлов (можно расширить список)
-echo Копирование PHP, CSS, JS...
-xcopy *.php "%temp_dir%\" /y /q >nul 2>&1
-xcopy *.css "%temp_dir%\" /y /q >nul 2>&1  
-xcopy *.js "%temp_dir%\" /y /q >nul 2>&1
-xcopy *.html "%temp_dir%\" /y /q >nul 2>&1
-
-:: Копируем папки рекурсивно
-if exist assets xcopy assets "%temp_dir%\assets\" /s /i /y /q >nul 2>&1
-if exist inc xcopy inc "%temp_dir%\inc\" /s /i /y /q >nul 2>&1
-if exist html xcopy html "%temp_dir%\html\" /s /i /y /q >nul 2>&1
-
-:: Убираем конфиг (безопасность)
-if exist "%temp_dir%\deploy" rmdir /s /q "%temp_dir%\deploy"
-
-echo 🚀 Загружаем на сервер...
-
-:: Создаем директории на сервере
-where plink >nul 2>&1
-if not errorlevel 1 (
-    echo y | plink -ssh -l "!SSH_USER!" -pw "!SSH_PASS!" "!SSH_HOST!" "mkdir -p !REMOTE_PATH!"
-) else (
-    ssh "!SSH_USER!@!SSH_HOST!" "mkdir -p !REMOTE_PATH!"
+echo Подключаемся к серверу по SSH ключу...
+echo Создаем директорию назначения...
+ssh -i "!SSH_KEY_PATH!" -p !SSH_PORT! -o StrictHostKeyChecking=accept-new "!SSH_USER!@!SSH_HOST!" "mkdir -p \"!REMOTE_PATH!\""
+if errorlevel 1 (
+    echo Ошибка подключения к серверу по ключу.
+    exit /b 1
 )
 
-:: Загрузка
-where pscp >nul 2>&1
-if not errorlevel 1 (
-    echo y | pscp -r -pw "!SSH_PASS!" "%temp_dir%\*" "!SSH_USER!@!SSH_HOST!:!REMOTE_PATH!/"
-) else (
-    scp -r "%temp_dir%\*" "!SSH_USER!@!SSH_HOST!:!REMOTE_PATH!/"
+echo Загружаем файлы по SSH ключу...
+scp -i "!SSH_KEY_PATH!" -P !SSH_PORT! -o StrictHostKeyChecking=accept-new -r ".\*" "!SSH_USER!@!SSH_HOST!:!REMOTE_PATH!/"
+if errorlevel 1 (
+    echo Ошибка загрузки файлов по SSH key.
+    exit /b 1
 )
 
-rmdir /s /q "%temp_dir%"
-echo ✅ SSH деплой завершен!
+echo SSH деплой завершен (ключ).
 exit /b 0
 
-:full_deploy
-echo.
-echo 🚀 ПОЛНЫЙ ДЕПЛОЙ (GitHub + Хостинг)
-echo ═══════════════════════════════════
-echo 1️⃣  Сохраняем и отправляем на GitHub...
-call :github_deploy_silent
-echo.
-echo 2️⃣  Загружаем файлы на хостинг...
-call :ssh_deploy_process
-echo.
-echo ✅ Полный деплой завершен!
-pause
-goto menu
+:ssh_with_password
+where plink >nul 2>&1
+if errorlevel 1 (
+    echo Для деплоя по паролю нужен plink.
+    exit /b 1
+)
+where pscp >nul 2>&1
+if errorlevel 1 (
+    echo Для деплоя по паролю нужен pscp.
+    exit /b 1
+)
+
+echo Ключ не найден. Используем fallback по паролю...
+echo Создаем директорию на сервере (пароль)...
+echo y | plink -ssh -P !SSH_PORT! -l "!SSH_USER!" -pw "!SSH_PASS!" "!SSH_HOST!" "mkdir -p !REMOTE_PATH!" >nul
+if errorlevel 1 (
+    echo Ошибка подключения к серверу по паролю.
+    exit /b 1
+)
+
+echo Загружаем файлы (пароль)...
+echo y | pscp -P !SSH_PORT! -r -pw "!SSH_PASS!" ".\*" "!SSH_USER!@!SSH_HOST!:!REMOTE_PATH!/" >nul
+if errorlevel 1 (
+    echo Ошибка загрузки файлов по паролю.
+    exit /b 1
+)
+
+echo SSH деплой завершен (пароль fallback).
+exit /b 0
 
 :setup_actions
 echo.
-echo 🤖 НАСТРОЙКА GITHUB ACTIONS
-echo ════════════════════════════
-echo.
-
-:: 1. Проверяем GH CLI
+echo ============================================================
+echo                 НАСТРОЙКА GITHUB ACTIONS
+echo ============================================================
 where gh >nul 2>&1
 if errorlevel 1 (
-    echo ⚠️  GitHub CLI (gh^) не найден.
-    echo Попытка установки через Winget...
-    winget install --id GitHub.cli -e --source winget
-    if errorlevel 1 (
-         echo ❌ Не удалось установить GH CLI.
-         echo Установите вручную: https://cli.github.com/
-         pause
-         goto menu
-    )
-    set "PATH=%PATH%;%ProgramFiles%\GitHub CLI"
+    echo Не найден GitHub CLI ^(gh^). Установите: https://cli.github.com/
+    pause
+    goto menu
 )
 
-:: 2. Авторизация
-echo 🔑 Проверка авторизации GitHub...
 gh auth status >nul 2>&1
 if errorlevel 1 (
-    echo Требуется вход в систему...
+    echo Требуется авторизация в GitHub CLI. Откроется окно входа.
     gh auth login -p https -w
 )
 
-:: ПРОВЕРКА ЛОКАЛЬНОГО СОЕДИНЕНИЯ (ПРЕЖДЕ ЧЕМ ОТПРАВЛЯТЬ)
-echo.
-echo 🔍 Проверка SSH соединения с хостингом...
-where plink >nul 2>&1
-if not errorlevel 1 (
-    echo y | plink -ssh -l "!SSH_USER!" -pw "!SSH_PASS!" "!SSH_HOST!" "exit" >nul 2>&1
-    if errorlevel 1 (
-        echo.
-        echo ❌ ОШИБКА: Ваши логин или пароль НЕ РАБОТАЮТ!
-        echo Сервер !SSH_HOST! отверг подключение.
-        echo.
-        echo Логин: '!SSH_USER!'
-        echo Пароль: ******* (проверьте config.json)
-        echo.
-        pause
-        goto menu
-    ) else (
-        echo ✅ Логин и пароль верные!
-    )
-) else (
-    echo ⚠️ Plink не найден, пропускаем локальную проверку...
+if not defined SSH_PORT set "SSH_PORT=22"
+if not defined SSH_KEY_PATH set /p "SSH_KEY_PATH=Путь к приватному ключу для GitHub Actions: "
+if not exist "%SSH_KEY_PATH%" (
+    echo Файл ключа не найден: %SSH_KEY_PATH%
+    pause
+    goto menu
 )
 
-:: 3. Создаем Workflow
-echo [1/2] 📝 Обновляем файл workflow...
 if not exist ".github\workflows" mkdir ".github\workflows"
-(
-    echo name: Deploy to Hosting
-    echo on:
-    echo   push:
-    echo     branches: [ "master", "main" ]
-    echo jobs:
-    echo   deploy:
-    echo     runs-on: ubuntu-latest
-    echo     steps:
-    echo       - name: Checkout Repository
-    echo         uses: actions/checkout@v3
-    echo       - name: Deploy to Hosting
-    echo         uses: appleboy/scp-action@master
-    echo         with:
-    echo           host: ${{ secrets.SSH_HOST }}
-    echo           username: ${{ secrets.SSH_USER }}
-    echo           password: ${{ secrets.SSH_PASSWORD }}
-    echo           source: "."
-    echo           target: ${{ secrets.REMOTE_PATH }}
-    echo           strip_components: 0
-    echo           debug: true
-) > ".github\workflows\deploy.yml"
-echo ✅ Файл workflow обновлен (включен debug режим).
+echo Шаг 1/2: Создаем workflow .github\workflows\deploy.yml
+powershell -NoProfile -ExecutionPolicy Bypass -File "write-workflow.ps1" -OutPath ".github\workflows\deploy.yml"
+if errorlevel 1 goto gh_secret_error
 
-:: 4. Настройка секретов
-echo [2/2] 🔐 Загрузка секретов в репозиторий (!REPO_SLUG!)...
-echo.
+set "REPO_SLUG=!REPO_URL!"
+set "REPO_SLUG=!REPO_SLUG:https://github.com/=!"
+set "REPO_SLUG=!REPO_SLUG:http://github.com/=!"
+set "REPO_SLUG=!REPO_SLUG:git@github.com:=!"
+if "!REPO_SLUG:~-4!"==".git" set "REPO_SLUG=!REPO_SLUG:~0,-4!"
+if "!REPO_SLUG:~-1!"=="/" set "REPO_SLUG=!REPO_SLUG:~0,-1!"
 
-:: ПРОВЕРКА: Пароль в памяти
-if "!SSH_PASS!"=="" (
-    echo ⚠️  Пароль не загружен из конфига.
-    set /p "SSH_PASS=🔑 Введите SSH пароль для отправки: "
+if "!REPO_SLUG!"=="" (
+    echo Не удалось определить repo slug из REPO_URL: !REPO_URL!
+    goto gh_secret_error
 )
 
-:: ПРОВЕРКА: Если все равно пустой
-if "!SSH_PASS!"=="" (
-    echo ❌ ОШИБКА: Пароль пустой! Нечего отправлять.
-    pause
-    goto menu
-)
+echo Шаг 2/2: Загружаем secrets в репозиторий !REPO_SLUG!...
+gh secret set SSH_HOST --body "%SSH_HOST%" -R "!REPO_SLUG!"
+if errorlevel 1 goto gh_secret_error
+gh secret set SSH_USER --body "%SSH_USER%" -R "!REPO_SLUG!"
+if errorlevel 1 goto gh_secret_error
+gh secret set SSH_PORT --body "%SSH_PORT%" -R "!REPO_SLUG!"
+if errorlevel 1 goto gh_secret_error
+gh secret set REMOTE_PATH --body "%REMOTE_PATH%" -R "!REPO_SLUG!"
+if errorlevel 1 goto gh_secret_error
 
-echo ⏳ Отправляем секреты...
+gh secret set SSH_KEY -R "!REPO_SLUG!" < "%SSH_KEY_PATH%"
+if errorlevel 1 goto gh_secret_error
 
-:: Обычные поля
-echo   1. SSH_HOST
-echo !SSH_HOST! | gh secret set SSH_HOST -R "!REPO_SLUG!"
-echo   2. SSH_USER
-echo !SSH_USER! | gh secret set SSH_USER -R "!REPO_SLUG!"
-echo   3. REMOTE_PATH
-echo !REMOTE_PATH! | gh secret set REMOTE_PATH -R "!REPO_SLUG!"
-
-:: Пароль (через PowerShell для надежности)
-echo   4. SSH_PASSWORD
-powershell -Command "[IO.File]::WriteAllText('pass.tmp', '!SSH_PASS!')"
-
-if not exist pass.tmp (
-    echo ❌ Не удалось создать временный файл с паролем.
-    pause
-    goto menu
-)
-
-gh secret set SSH_PASSWORD -R "!REPO_SLUG!" < pass.tmp
-del pass.tmp
-
-if errorlevel 1 (
-    echo ❌ Ошибка GitHub CLI при отправке пароля.
-) else (
-    echo ✅ Пароль успешно загружен!
-)
+if defined SSH_PASS gh secret set SSH_PASSWORD --body "%SSH_PASS%" -R "!REPO_SLUG!" >nul 2>&1
 
 echo.
-echo 📊 Проверка списка секретов на GitHub:
+echo Готово. Workflow и secrets настроены.
 gh secret list -R "!REPO_SLUG!"
-echo.
-echo (Если вы видите список выше - значит связь есть)
+pause
+goto menu
+
+:gh_secret_error
+echo Ошибка при загрузке secrets через gh.
 pause
 goto menu
 
 :github_deploy_silent
+call :ensure_git
 git add . >nul 2>&1
-git commit -m "Auto deploy" >nul 2>&1
-git push origin !BRANCH!
-if errorlevel 1 git push origin !BRANCH! --force
+git commit -m "Auto deploy %date% %time%" >nul 2>&1
+git push -u origin "!BRANCH!" >nul 2>&1
 exit /b
+
+:full_deploy
+call :github_deploy_silent
+call :ssh_deploy_process
+pause
+goto menu
 
 :status
 echo.
-echo 📊 СТАТУС
-git status
-pause
-goto menu
+echo ============================================================
+echo                           СТАТУС
+echo ============================================================
+git status 2>nul
+if errorlevel 1 echo Git не инициализирован.
 
-:exit
-exit
-:invalid
-goto menu
-echo 📊 СТАТУС ПРОЕКТА  
-echo ══════════════════
-echo.
-git status 2>nul || echo ❌ Git не инициализирован
 git remote -v 2>nul
 echo.
-where scp >nul 2>&1 && echo ✅ SCP найден || echo ❌ SCP не найден
-where plink >nul 2>&1 && echo ✅ PuTTY найден || echo ❌ PuTTY не найден
-echo.
+echo SSH host: !SSH_HOST!
+echo SSH user: !SSH_USER!
+echo SSH port: !SSH_PORT!
+echo SSH key : !SSH_KEY_PATH!
+echo Remote path: !REMOTE_PATH!
 pause
 goto menu
 
-:github_deploy_silent
-echo   • Коммит и Push...
-git add . >nul 2>&1
-git commit -m "Автоматический деплой %date% %time%" >nul 2>&1
-git push origin !BRANCH!
-echo   ✅ Готово
-exit /b
-
-:invalid
-echo ❌ Неверный выбор!
-timeout /t 2 >nul
-goto menu
-
 :exit
-echo 👋 До свидания!
-timeout /t 1 >nul
+exit /b 0

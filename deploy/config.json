@@ -1,0 +1,33 @@
+﻿{
+  "project": {
+    "name": "TEST",
+    "description": "Auto-generated project"
+  },
+  "github": {
+    "repository_url": "https://github.com/ver-tuego/test-successful-deploy-.git",
+    "branch": "main",
+    "auto_commit": true
+  },
+  "hosting": {
+    "provider": "custom",
+    "ssh_host": "109.196.102.2",
+    "ssh_port": "2222",
+    "ssh_user": "root",
+    "ssh_password": "",
+    "ssh_key_path": "C:\\Users\\user\\.ssh\\deploy_hosting",
+    "remote_path": "/root/gggg",
+    "backup_enabled": true
+  },
+  "deploy": {
+    "exclude_files": [
+      "deploy/",
+      ".git/",
+      "node_modules/",
+      "*.log",
+      ".env*",
+      "README.md"
+    ],
+    "create_backup": true
+  }
+}
+
