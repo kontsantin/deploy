@@ -1,29 +1,40 @@
-# Universal Deploy System
+﻿# Universal Deploy (Windows)
 
-## 🚀 Установка в любой проект
+Короткий batch-скрипт для деплоя проекта: GitHub push, локальный SSH/SCP деплой и настройка GitHub Actions.
 
-Просто запустите эту команду в папке вашего проекта:
+## Что в репозитории
+- `deploy.bat` — основное меню деплоя.
+- `read-config.ps1` — чтение `deploy/config.json`.
+- `write-workflow.ps1` — генерация `.github/workflows/deploy.yml`.
+- `deploy/config.json` — создается/обновляется скриптом.
+
+## Требования
+- Windows + PowerShell.
+- `git`.
+- Для SSH-деплоя: `ssh`+`scp` (OpenSSH) или `plink`+`pscp` (PuTTY).
+- Для пункта `4` (Actions): `gh` (GitHub CLI) и авторизация `gh auth login`.
+
+## Быстрый старт
 ```powershell
-git clone https://github.com/kontsantin/deploy.git deploy && del deploy\.git && cd deploy && call deploy.bat
+git clone https://github.com/ver-tuego/deploy-test.git
+cd deploy-test
+.\deploy.bat
 ```
 
-## ⚙️ Настройка
-1. Откройте `deploy/config.json`
-2. Укажите данные от хостинга (SSH) и GitHub репозитория.
-3. Запустите `deploy/deploy.bat`
+При первом запуске скрипт попросит:
+- `REPO_URL` (ваш GitHub репозиторий),
+- SSH данные (`SSH_HOST`, `SSH_PORT`, `SSH_USER`, `SSH_KEY_PATH`, `REMOTE_PATH`),
+- при необходимости `SSH_PASS` как fallback.
 
-## 📋 Возможности
-* Автоматический пуш на GitHub
-* Деплой на хостинг через SSH (SCP/PLINK)
-* Настройка GitHub Actions (CI/CD)
+## Меню
+1. Сохранить изменения в GitHub.
+2. Залить на сервер (локальный SSH деплой).
+3. Полный деплой (1 + 2).
+4. Настроить GitHub Actions (workflow + secrets).
+5. Изменить настройки.
+6. Проверить статус.
+7. Выход.
 
-
-### Windows (CMD)
-```cmd
-git clone https://github.com/kontsantin/deploy.git deploy && rd /s /q deploy\.git && cd deploy && deploy.bat
-```
-
-### PowerShell
-```powershell
-git clone https://github.com/kontsantin/deploy.git deploy; Remove-Item deploy\.git -Recurse -Force; cd deploy; .\deploy.bat
-```
+## Важно
+- Пункт `4` отправляет secrets в репозиторий, который берется из `REPO_URL` в конфиге.
+- Перед `4` проверьте `REPO_URL` через пункт `5`, чтобы secrets не ушли в другой репозиторий.
